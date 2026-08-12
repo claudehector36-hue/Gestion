@@ -319,3 +319,290 @@ export async function generateTimesheetExcel(options: ExportOptions): Promise<Bu
   const arrayBuffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);
 }
+
+export interface GlobalExportOptions {
+  users: User[];
+  timeEntries: TimeEntry[];
+  missions: Mission[];
+  clients: Client[];
+  periodLabel?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export async function generateGlobalTimesheetExcel(options: GlobalExportOptions): Promise<Buffer> {
+  const { users, timeEntries, periodLabel = 'Toutes périodes', startDate, endDate } = options;
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'STK-TIMESHEET App';
+  workbook.lastModifiedBy = 'Administrateur STK';
+  workbook.created = new Date();
+
+  const NAVY_HEADER_FILL = '1E293B';
+  const SUBHEADER_FILL = 'F1F5F9';
+  const TABLE_HEADER_FILL = '334155';
+  const LIGHT_ROW_FILL = 'F8FAFC';
+  const BORDER_COLOR = 'CBD5E1';
+
+  // 1. Synthèse Globale Sheet
+  const summarySheet = workbook.addWorksheet('Synthèse Globale', {
+    views: [{ showGridLines: true }]
+  });
+
+  // Title Block
+  summarySheet.mergeCells('A1:F1');
+  const titleCell = summarySheet.getCell('A1');
+  titleCell.value = 'STK-TIMESHEET — SYNTHÈSE GLOBALE DES SITES ET COLLABORATEURS';
+  titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_HEADER_FILL } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  summarySheet.getRow(1).height = 34;
+
+  // Subheader
+  summarySheet.mergeCells('A2:F2');
+  const subCell = summarySheet.getCell('A2');
+  subCell.value = `Période d'export: ${periodLabel}  |  Date de génération: ${new Date().toLocaleDateString('fr-FR')}`;
+  subCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: '334155' } };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SUBHEADER_FILL } };
+  subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  summarySheet.getRow(2).height = 22;
+
+  summarySheet.addRow([]); // Blank row 3
+
+  // Headers
+  const headers = [
+    'Collaborateur',
+    'Email',
+    'Département',
+    'Heures Saisies (h)',
+    'Jours Équivalents (8h/j)',
+    'Nombre de Tâches'
+  ];
+
+  const headerRow = summarySheet.addRow(headers);
+  headerRow.height = 26;
+  headerRow.eachCell((cell) => {
+    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TABLE_HEADER_FILL } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = {
+      top: { style: 'thin', color: { argb: BORDER_COLOR } },
+      bottom: { style: 'medium', color: { argb: '0F172A' } },
+      left: { style: 'thin', color: { argb: BORDER_COLOR } },
+      right: { style: 'thin', color: { argb: BORDER_COLOR } }
+    };
+  });
+
+  const startRowIndex = 5;
+  let currentRowIndex = startRowIndex;
+
+  users.forEach((u, idx) => {
+    let userEntries = timeEntries.filter(te => te.userId === u.id);
+    if (startDate) userEntries = userEntries.filter(te => te.date >= startDate);
+    if (endDate) userEntries = userEntries.filter(te => te.date <= endDate);
+
+    const totalHours = userEntries.reduce((sum, te) => sum + te.hours, 0);
+
+    const row = summarySheet.addRow([
+      `${u.firstName} ${u.lastName}`,
+      u.email,
+      u.department || 'Général',
+      totalHours,
+      { formula: `D${currentRowIndex}/8` },
+      userEntries.length
+    ]);
+
+    row.height = 22;
+    const isEven = idx % 2 === 0;
+
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cell.font = { name: 'Arial', size: 9 };
+      cell.border = {
+        top: { style: 'thin', color: { argb: BORDER_COLOR } },
+        bottom: { style: 'thin', color: { argb: BORDER_COLOR } },
+        left: { style: 'thin', color: { argb: BORDER_COLOR } },
+        right: { style: 'thin', color: { argb: BORDER_COLOR } }
+      };
+
+      if (!isEven) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LIGHT_ROW_FILL } };
+      }
+
+      if (colNumber === 1) {
+        cell.font = { name: 'Arial', size: 9, bold: true };
+      } else if (colNumber === 4) {
+        cell.alignment = { horizontal: 'right' };
+        cell.numFmt = '0.0 "h"';
+        cell.font = { name: 'Arial', size: 9, bold: true };
+      } else if (colNumber === 5) {
+        cell.alignment = { horizontal: 'right' };
+        cell.numFmt = '0.0 "j"';
+      } else if (colNumber === 6) {
+        cell.alignment = { horizontal: 'center' };
+      }
+    });
+
+    currentRowIndex++;
+  });
+
+  // Summary Total Row
+  const totalRowIndex = currentRowIndex;
+  const totalRow = summarySheet.addRow([
+    'TOTAL GÉNÉRAL',
+    '',
+    '',
+    { formula: `SUM(D${startRowIndex}:D${totalRowIndex - 1})` },
+    { formula: `D${totalRowIndex}/8` },
+    { formula: `SUM(F${startRowIndex}:F${totalRowIndex - 1})` }
+  ]);
+
+  summarySheet.mergeCells(`A${totalRowIndex}:C${totalRowIndex}`);
+  totalRow.height = 26;
+
+  totalRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: '0F172A' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'E2E8F0' } };
+    cell.border = {
+      top: { style: 'medium', color: { argb: '0F172A' } },
+      bottom: { style: 'double', color: { argb: '0F172A' } },
+      left: { style: 'thin', color: { argb: BORDER_COLOR } },
+      right: { style: 'thin', color: { argb: BORDER_COLOR } }
+    };
+
+    if (colNumber === 1) {
+      cell.alignment = { horizontal: 'right', vertical: 'middle' };
+    } else if (colNumber === 4) {
+      cell.alignment = { horizontal: 'right', vertical: 'middle' };
+      cell.numFmt = '0.0 "h"';
+    } else if (colNumber === 5) {
+      cell.alignment = { horizontal: 'right', vertical: 'middle' };
+      cell.numFmt = '0.0 "j"';
+    } else if (colNumber === 6) {
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+  });
+
+  summarySheet.columns = [
+    { width: 28 }, // Collaborateur
+    { width: 30 }, // Email
+    { width: 20 }, // Département
+    { width: 20 }, // Heures Saisies
+    { width: 22 }, // Jours Équivalents
+    { width: 18 }  // Nombre de Tâches
+  ];
+
+  // 2. Individual User Tabs
+  for (const u of users) {
+    let userEntries = timeEntries.filter(te => te.userId === u.id);
+    if (startDate) userEntries = userEntries.filter(te => te.date >= startDate);
+    if (endDate) userEntries = userEntries.filter(te => te.date <= endDate);
+
+    if (userEntries.length === 0) continue;
+
+    const safeSheetName = `${u.lastName} ${u.firstName.charAt(0)}.`.replace(/[:\\/?*\[\]]/g, '').slice(0, 30);
+    const userSheet = workbook.addWorksheet(safeSheetName, { views: [{ showGridLines: true }] });
+
+    userSheet.mergeCells('A1:H1');
+    const uTitle = userSheet.getCell('A1');
+    uTitle.value = `TIMESHEET — ${u.firstName.toUpperCase()} ${u.lastName.toUpperCase()}`;
+    uTitle.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFF' } };
+    uTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_HEADER_FILL } };
+    uTitle.alignment = { horizontal: 'center', vertical: 'middle' };
+    userSheet.getRow(1).height = 34;
+
+    userSheet.mergeCells('A2:H2');
+    const uSub = userSheet.getCell('A2');
+    uSub.value = `Département: ${u.department || 'Général'}  |  Email: ${u.email}  |  Période: ${periodLabel}`;
+    uSub.font = { name: 'Arial', size: 10, bold: true, color: { argb: '334155' } };
+    uSub.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SUBHEADER_FILL } };
+    uSub.alignment = { horizontal: 'center', vertical: 'middle' };
+    userSheet.getRow(2).height = 22;
+
+    userSheet.addRow([]);
+
+    const uHeaders = ['Date', 'Jour', 'Client', 'Mission / Projet', 'Activité / Tâche', 'Description', 'Statut', 'Durée (h)'];
+    const uHeaderRow = userSheet.addRow(uHeaders);
+    uHeaderRow.height = 26;
+    uHeaderRow.eachCell(c => {
+      c.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TABLE_HEADER_FILL } };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+
+    let uRowIndex = 5;
+    userEntries.sort((a,b) => a.date.localeCompare(b.date)).forEach((entry, idx) => {
+      const entryDate = new Date(entry.date);
+      const dayNamesFr = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+      const dayName = dayNamesFr[entryDate.getDay()] || '';
+      const taskStatusVal = entry.taskStatus || 'Terminé';
+
+      const row = userSheet.addRow([
+        formatDateFr(entry.date),
+        dayName,
+        entry.clientName,
+        entry.missionName,
+        entry.activity,
+        entry.description || '-',
+        taskStatusVal,
+        entry.hours
+      ]);
+
+      row.height = 22;
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        cell.font = { name: 'Arial', size: 9 };
+        cell.border = {
+          top: { style: 'thin', color: { argb: BORDER_COLOR } },
+          bottom: { style: 'thin', color: { argb: BORDER_COLOR } },
+          left: { style: 'thin', color: { argb: BORDER_COLOR } },
+          right: { style: 'thin', color: { argb: BORDER_COLOR } }
+        };
+        if (colNumber === 1 || colNumber === 2) {
+          cell.alignment = { horizontal: 'center' };
+          cell.font = { name: 'Arial', size: 9, bold: true };
+        } else if (colNumber === 7) {
+          cell.alignment = { horizontal: 'center' };
+          cell.font = { name: 'Arial', size: 9, bold: true };
+          if (taskStatusVal === 'En attente') {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FEF3C7' } };
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'B45309' } };
+          } else if (taskStatusVal === 'En cours') {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'DBEAFE' } };
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: '1D4ED8' } };
+          } else {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'DCFCE7' } };
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: '15803D' } };
+          }
+        } else if (colNumber === 8) {
+          cell.alignment = { horizontal: 'right' };
+          cell.numFmt = '0.0 "h"';
+          cell.font = { name: 'Arial', size: 9, bold: true };
+        }
+      });
+      uRowIndex++;
+    });
+
+    const uTotalRow = userSheet.addRow([
+      'TOTAL COLLABORATEUR', '', '', '', '', '', '',
+      { formula: `SUM(H5:H${uRowIndex - 1})` }
+    ]);
+    userSheet.mergeCells(`A${uRowIndex}:G${uRowIndex}`);
+    uTotalRow.height = 26;
+    uTotalRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: '0F172A' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'E2E8F0' } };
+      if (colNumber === 1 || colNumber === 8) {
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        if (colNumber === 8) cell.numFmt = '0.0 "h"';
+      }
+    });
+
+    userSheet.columns = [
+      { width: 14 }, { width: 12 }, { width: 22 }, { width: 26 },
+      { width: 24 }, { width: 42 }, { width: 16 }, { width: 14 }
+    ];
+  }
+
+  const arrayBuffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(arrayBuffer);
+}
+

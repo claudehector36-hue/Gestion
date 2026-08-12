@@ -46,6 +46,42 @@ export const GlobalTimesheetView: React.FC<GlobalTimesheetViewProps> = ({
   const [customEndDate, setCustomEndDate] = useState(todayStr);
 
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingGlobal, setIsExportingGlobal] = useState(false);
+
+  // Download Global Excel across all collaborators
+  const handleDownloadGlobalExcel = async () => {
+    setIsExportingGlobal(true);
+    try {
+      let url = `/api/export/global?startDate=${encodeURIComponent(computedStartDate)}&endDate=${encodeURIComponent(computedEndDate)}`;
+
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        }
+      });
+
+      if (!res.ok) {
+        throw new Error('Erreur lors de la génération de l\'export Excel Global');
+      }
+
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `Timesheet_Global_${computedStartDate}_${computedEndDate}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+
+      showToast('success', 'Export Global Téléchargé', 'Le Timesheet Global de tous les collaborateurs a été téléchargé avec succès.');
+    } catch (err) {
+      console.error('Error downloading Global Excel:', err);
+      showToast('error', 'Erreur d\'exportation', 'Impossible de télécharger le fichier Excel Global.');
+    } finally {
+      setIsExportingGlobal(false);
+    }
+  };
 
   // Helper for rendering status badges
   const renderStatusBadge = (statusVal?: TaskStatus) => {
@@ -244,7 +280,15 @@ export const GlobalTimesheetView: React.FC<GlobalTimesheetViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center space-x-3 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <button
+              onClick={handleDownloadGlobalExcel}
+              disabled={isExportingGlobal}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer flex items-center space-x-2"
+            >
+              <Download className="w-4 h-4" />
+              <span>{isExportingGlobal ? 'Génération...' : 'Télécharger Export Global (.xlsx)'}</span>
+            </button>
             <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-right">
               <p className="text-[10px] text-slate-500 uppercase">Utilisateurs</p>
               <p className="font-bold text-slate-900 text-sm font-mono">{users.length}</p>

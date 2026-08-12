@@ -4,7 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import bcrypt from 'bcryptjs';
-import { generateTimesheetExcel } from './src/server/exportExcel.js';
+import { generateTimesheetExcel, generateGlobalTimesheetExcel } from './src/server/exportExcel.js';
 import { User, Client, Mission, TimeEntry, TimesheetPeriod, AssignedTask } from './src/types.js';
 
 const __filename_var = typeof __filename !== 'undefined' ? __filename : process.cwd();
@@ -649,7 +649,7 @@ app.use(express.json());
   // -------------------------------------------------------------
   // EXPORT EXCEL (.XLSX)
   // -------------------------------------------------------------
-  app.get('/api/export/excel', requireAuth, async (req: Request, res: Response) => {
+  const handleUserExcelExport = async (req: Request, res: Response) => {
     try {
       const reqUser = (req as any).user as User;
       let targetUserId = req.query.userId as string;
@@ -704,7 +704,44 @@ app.use(express.json());
       console.error('Error generating Excel export:', error);
       return res.status(500).json({ error: "Erreur lors de la génération du fichier Excel" });
     }
-  });
+  };
+
+  const handleGlobalExcelExport = async (req: Request, res: Response) => {
+    try {
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+
+      const db = readDb();
+
+      const periodLabel = startDate && endDate ? `Du ${startDate} au ${endDate}` : 'Toutes périodes';
+
+      const excelBuffer = await generateGlobalTimesheetExcel({
+        users: db.users,
+        timeEntries: db.timeEntries,
+        missions: db.missions,
+        clients: db.clients,
+        periodLabel,
+        startDate,
+        endDate
+      });
+
+      const filename = `Timesheet_Global_${Date.now()}.xlsx`;
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(excelBuffer);
+
+    } catch (error) {
+      console.error('Error generating Global Excel export:', error);
+      return res.status(500).json({ error: "Erreur lors de la génération du fichier Excel Global" });
+    }
+  };
+
+  app.get('/api/export/excel', requireAuth, handleUserExcelExport);
+  app.get('/api/export/timesheet/excel', requireAuth, handleUserExcelExport);
+  app.get('/api/export/timesheet', requireAuth, handleUserExcelExport);
+  app.get('/api/export/global', requireAdmin, handleGlobalExcelExport);
+  app.get('/api/export/timesheet/global', requireAdmin, handleGlobalExcelExport);
 
   // -------------------------------------------------------------
   // VITE & STATIC FILES (Local / Container)
