@@ -7,8 +7,8 @@ import bcrypt from 'bcryptjs';
 import { generateTimesheetExcel } from './src/server/exportExcel.js';
 import { User, Client, Mission, TimeEntry, TimesheetPeriod, AssignedTask } from './src/types.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename_var = typeof __filename !== 'undefined' ? __filename : process.cwd();
+const __dirname_var = typeof __dirname !== 'undefined' ? __dirname : path.dirname(__filename_var);
 
 const PORT = 3000;
 const IS_VERCEL = !!process.env.VERCEL;
